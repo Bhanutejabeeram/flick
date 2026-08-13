@@ -152,7 +152,8 @@ public final class InboxStore: @unchecked Sendable {
             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12,1)
             ON CONFLICT(session_id) DO UPDATE SET
                 agent=excluded.agent,
-                project=excluded.project,
+                -- Keep the project the session started in: a transient `cd`
+                -- inside the session must not rename its row in the UI.
                 cwd=excluded.cwd,
                 tty=COALESCE(excluded.tty, sessions.tty),
                 pid=COALESCE(excluded.pid, sessions.pid),

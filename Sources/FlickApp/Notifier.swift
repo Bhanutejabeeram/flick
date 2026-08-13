@@ -58,7 +58,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
 
         guard Preferences.shared.notificationsEnabled else { return }
-        let title = "\(request.agent.displayName) — \(request.project)"
+        let title = request.agent.displayName
         let body: String
         switch request.type {
         case .approval: body = "Wants to run: \(request.message)"
@@ -75,13 +75,17 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
         let content = UNMutableNotificationContent()
         content.title = title
+        // Project rides in the smaller subtitle line, not the title.
+        content.subtitle = request.project
         content.body = body
         content.userInfo = ["requestID": request.id]
         switch request.type {
         case .approval:
             // Never put a one-click Allow on a destructive command.
             content.categoryIdentifier = request.risk == .high ? Category.info : Category.approval
-            content.subtitle = request.risk == .high ? "Destructive — review before approving" : ""
+            if request.risk == .high {
+                content.subtitle = "Destructive — review before approving"
+            }
         case .question:
             content.categoryIdentifier = Category.question
         default:

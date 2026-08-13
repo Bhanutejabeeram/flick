@@ -11,7 +11,7 @@ CONFIG="${1:-release}"
 BUILD_DIR="$ROOT/.build/$CONFIG"
 APP="$ROOT/build/Flick.app"
 BUNDLE_ID="com.flick.Flick"
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 echo "==> Building ($CONFIG)"
 cd "$ROOT"

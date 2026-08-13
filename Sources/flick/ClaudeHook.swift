@@ -213,7 +213,8 @@ enum ClaudeHook {
 
         let cwd = input["cwd"] as? String ?? FileManager.default.currentDirectoryPath
         let last = (input["last_assistant_message"] as? String) ?? ""
-        let summary = last.isEmpty ? "Claude Code finished its turn." : condense(last, limit: 220)
+        let summary = last.isEmpty ? "Claude Code finished its turn."
+                                   : condense(stripMarkdown(last), limit: 220)
 
         let request = InboxRequest(
             agent: .claude,
@@ -310,6 +311,25 @@ enum ClaudeHook {
     private static func displayPath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// Notifications render plain text, so markdown markers read as noise
+    /// ("**bold**" shows its asterisks). Strip the common inline markers and
+    /// collapse links to their label; this is display-only, never shown for
+    /// commands the user approves.
+    private static func stripMarkdown(_ text: String) -> String {
+        var out = text
+        for pattern in [
+            (#"\[([^\]]*)\]\([^)]*\)"#, "$1"),   // [label](url) → label
+            (#"(\*\*|__)(.*?)\1"#, "$2"),        // **bold** / __bold__
+            (#"`([^`]*)`"#, "$1"),               // `code`
+            (#"(?m)^#{1,6}\s+"#, ""),            // heading markers
+            (#"(?m)^\s*[-*+]\s+"#, "• "),        // list bullets
+        ] {
+            out = out.replacingOccurrences(of: pattern.0, with: pattern.1,
+                                           options: .regularExpression)
+        }
+        return out
     }
 
     private static func condense(_ text: String, limit: Int) -> String {

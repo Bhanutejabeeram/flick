@@ -124,6 +124,21 @@ public final class InboxStore: @unchecked Sendable {
         CREATE INDEX IF NOT EXISTS idx_requests_created ON requests(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_requests_session ON requests(session_id);
         """)
+
+        // v2: pid identity. ALTER is idempotent-by-guard because SQLite has
+        // no ADD COLUMN IF NOT EXISTS.
+        if !columnExists("process_name", in: "sessions") {
+            try exec("ALTER TABLE sessions ADD COLUMN process_name TEXT;")
+        }
+    }
+
+    private func columnExists(_ column: String, in table: String) -> Bool {
+        guard let stmt = try? prepare("PRAGMA table_info(\(table));") else { return false }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 1), String(cString: c) == column { return true }
+        }
+        return false
     }
 
     private func prepare(_ sql: String) throws -> OpaquePointer? {
@@ -144,19 +159,25 @@ public final class InboxStore: @unchecked Sendable {
 
     // MARK: - Sessions
 
-    public func upsertSession(from request: InboxRequest) {
+    /// `updateProject` is passed only for session-start events: the project
+    /// label is set where the session begins (and re-set on resume/clear),
+    /// but a transient `cd` mid-session must not rename the row in the UI.
+    public func upsertSession(from request: InboxRequest, updateProject: Bool = false) {
         queue.sync {
+            let projectClause = updateProject
+                ? "project=excluded.project,"
+                : ""
             let sql = """
-            INSERT INTO sessions (session_id, agent, project, cwd, tty, pid, term_program, bundle_id,
+            INSERT INTO sessions (session_id, agent, project, cwd, tty, pid, process_name, term_program, bundle_id,
                                   channel_kind, channel_socket, channel_token, first_seen, last_seen, is_active)
-            VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12,1)
+            VALUES (?1,?2,?3,?4,?5,?6,?13,?7,?8,?9,?10,?11,?12,?12,1)
             ON CONFLICT(session_id) DO UPDATE SET
                 agent=excluded.agent,
-                -- Keep the project the session started in: a transient `cd`
-                -- inside the session must not rename its row in the UI.
+                \(projectClause)
                 cwd=excluded.cwd,
                 tty=COALESCE(excluded.tty, sessions.tty),
                 pid=COALESCE(excluded.pid, sessions.pid),
+                process_name=COALESCE(excluded.process_name, sessions.process_name),
                 term_program=COALESCE(excluded.term_program, sessions.term_program),
                 bundle_id=COALESCE(excluded.bundle_id, sessions.bundle_id),
                 channel_kind=COALESCE(excluded.channel_kind, sessions.channel_kind),
@@ -179,6 +200,7 @@ public final class InboxStore: @unchecked Sendable {
             bind(stmt, 10, request.channel?.socketPath)
             bind(stmt, 11, request.channel?.token)
             sqlite3_bind_double(stmt, 12, Date().timeIntervalSince1970)
+            bind(stmt, 13, request.origin.processName)
             sqlite3_step(stmt)
         }
     }
@@ -197,7 +219,8 @@ public final class InboxStore: @unchecked Sendable {
         queue.sync {
             let sql = """
             SELECT session_id, agent, project, cwd, tty, pid, term_program, bundle_id,
-                   channel_kind, channel_socket, channel_token, first_seen, last_seen, is_active
+                   channel_kind, channel_socket, channel_token, first_seen, last_seen, is_active,
+                   process_name
             FROM sessions WHERE is_active=1 AND last_seen > ?1 ORDER BY last_seen DESC;
             """
             guard let stmt = try? prepare(sql) else { return [] }
@@ -215,7 +238,8 @@ public final class InboxStore: @unchecked Sendable {
         queue.sync {
             let sql = """
             SELECT session_id, agent, project, cwd, tty, pid, term_program, bundle_id,
-                   channel_kind, channel_socket, channel_token, first_seen, last_seen, is_active
+                   channel_kind, channel_socket, channel_token, first_seen, last_seen, is_active,
+                   process_name
             FROM sessions WHERE session_id=?1;
             """
             guard let stmt = try? prepare(sql) else { return nil }
@@ -234,6 +258,7 @@ public final class InboxStore: @unchecked Sendable {
         let origin = SessionOrigin(
             tty: text(4),
             pid: sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : sqlite3_column_int(stmt, 5),
+            processName: text(14),
             termProgram: text(6),
             bundleIdentifier: text(7))
         let channel: ResponseChannel? = text(8).map {

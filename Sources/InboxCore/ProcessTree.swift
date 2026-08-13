@@ -85,6 +85,24 @@ public enum ProcessTree {
         "claude", "codex", "gemini", "aider", "node", "bun", "deno",
     ]
 
+    /// Whether a recorded process name identifies an agent unambiguously.
+    /// A shell or `login` ancestor (the no-agent fallback) can be shared by
+    /// several sessions in one terminal, so it must never be used to decide
+    /// that two session rows are the same session.
+    public static func isAgentProcessName(_ name: String?) -> Bool {
+        guard let name else { return false }
+        return agentProcessNames.contains(name)
+    }
+
+    /// Whether `pid` is alive AND still the process it was when recorded.
+    /// kill(pid, 0) alone would report a recycled pid as alive forever; the
+    /// name check catches the recycle as soon as something else takes the pid.
+    public static func isAlive(pid: Int32, recordedName: String?) -> Bool {
+        guard isAlive(pid: pid) else { return false }
+        guard let recordedName, let current = info(for: pid) else { return true }
+        return current.name == recordedName
+    }
+
     /// Shells an agent may use to spawn a hook (`/bin/sh -c …`). These exit
     /// the moment the hook does, so they are useless as a liveness handle.
     private static let shellNames: Set<String> = ["sh", "bash", "zsh", "dash", "fish"]

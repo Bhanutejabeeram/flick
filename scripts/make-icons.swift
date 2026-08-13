@@ -1,90 +1,121 @@
-// Draws the Flick logo — three rounded bars + a chevron — and writes:
-//   AppIcon.iconset/  (all sizes, dark tile, for iconutil)
-//   MenuIcon.png / MenuIcon@2x.png  (monochrome template for the menu bar)
-// Usage: swift scripts/make-icons.swift <output-dir>
+// Generates all app icons from the master logo (assets/flick.png):
+//   AppIcon.iconset/  (all sizes, rounded tile, for iconutil)
+//   MenuIcon.png / MenuIcon@2x.png  (monochrome template for the menu bar,
+//   cropped to the glyph and alpha-masked from luminance so it stays crisp
+//   at 18pt and adapts to light/dark menu bars)
+// Usage: swift scripts/make-icons.swift <source.png> <output-dir>
 import AppKit
 
-// ── Palette ────────────────────────────────────────────────────────────────
-// Bar gradient, tweak these two to restyle the logo.
-let barStart = NSColor(calibratedRed: 1.00, green: 0.72, blue: 0.30, alpha: 1) // amber
-let barEnd   = NSColor(calibratedRed: 1.00, green: 0.40, blue: 0.35, alpha: 1) // coral
-let chevronColor = NSColor.white
-let tileColor = NSColor(calibratedRed: 0.055, green: 0.055, blue: 0.075, alpha: 1)
-
-// ── Geometry (unit square, y-up) ───────────────────────────────────────────
-// (minX, maxX, centerY) per bar; middle bar is the widest, like the mock.
-let bars: [(CGFloat, CGFloat, CGFloat)] = [
-    (0.14, 0.40, 0.66),
-    (0.09, 0.43, 0.50),
-    (0.13, 0.39, 0.34),
-]
-let barHeight: CGFloat = 0.085
-let chevron: [(CGFloat, CGFloat)] = [(0.56, 0.83), (0.84, 0.50), (0.56, 0.17)]
-let chevronWidth: CGFloat = 0.115
-
-func drawLogo(in rect: CGRect, tile: Bool, monochrome: Bool) {
-    let s = rect.width
-    if tile {
-        let inset = s * 0.06
-        let tileRect = rect.insetBy(dx: inset, dy: inset)
-        let path = NSBezierPath(roundedRect: tileRect, xRadius: s * 0.20, yRadius: s * 0.20)
-        tileColor.setFill()
-        path.fill()
-    }
-    for (i, bar) in bars.enumerated() {
-        let h = barHeight * s
-        let barRect = CGRect(x: bar.0 * s, y: bar.2 * s - h / 2,
-                             width: (bar.1 - bar.0) * s, height: h)
-        let pill = NSBezierPath(roundedRect: barRect, xRadius: h / 2, yRadius: h / 2)
-        if monochrome {
-            NSColor.black.setFill()
-            pill.fill()
-        } else {
-            // Shift each bar's gradient slightly, like the reference mark.
-            let t = CGFloat(i) * 0.18
-            let a = barStart.blended(withFraction: t, of: barEnd) ?? barStart
-            let b = barEnd.blended(withFraction: t * 0.5, of: barStart) ?? barEnd
-            NSGradient(starting: a, ending: b)?.draw(in: pill, angle: 0)
-        }
-    }
-    let stroke = NSBezierPath()
-    stroke.move(to: CGPoint(x: chevron[0].0 * s, y: chevron[0].1 * s))
-    stroke.line(to: CGPoint(x: chevron[1].0 * s, y: chevron[1].1 * s))
-    stroke.line(to: CGPoint(x: chevron[2].0 * s, y: chevron[2].1 * s))
-    stroke.lineWidth = chevronWidth * s
-    stroke.lineCapStyle = .round
-    stroke.lineJoinStyle = .round
-    (monochrome ? NSColor.black : chevronColor).setStroke()
-    stroke.stroke()
+guard CommandLine.arguments.count >= 3 else {
+    fatalError("usage: make-icons.swift <source.png> <output-dir>")
+}
+let sourcePath = CommandLine.arguments[1]
+let outDir = CommandLine.arguments[2]
+guard let source = NSImage(contentsOfFile: sourcePath) else {
+    fatalError("cannot read \(sourcePath)")
 }
 
-func writePNG(size: Int, to path: String, tile: Bool, monochrome: Bool) {
-    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
+func render(width: Int, height: Int, draw: (CGRect) -> Void) -> NSBitmapImageRep {
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
                                      bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                      isPlanar: false, colorSpaceName: .deviceRGB,
                                      bytesPerRow: 0, bitsPerPixel: 0),
           let ctx = NSGraphicsContext(bitmapImageRep: rep) else {
-        fatalError("could not create bitmap \(size)px")
+        fatalError("could not create bitmap \(width)x\(height)")
     }
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = ctx
-    drawLogo(in: CGRect(x: 0, y: 0, width: size, height: size), tile: tile, monochrome: monochrome)
+    draw(CGRect(x: 0, y: 0, width: width, height: height))
     ctx.flushGraphics()
     NSGraphicsContext.restoreGraphicsState()
+    return rep
+}
+
+func writePNG(_ rep: NSBitmapImageRep, to path: String) {
     guard let data = rep.representation(using: .png, properties: [:]) else {
         fatalError("could not encode \(path)")
     }
     try! data.write(to: URL(fileURLWithPath: path))
 }
 
-let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "build/icons"
+// ── App icon: the logo clipped to macOS's rounded tile ─────────────────────
+func appIcon(size: Int) -> NSBitmapImageRep {
+    render(width: size, height: size) { rect in
+        let s = rect.width
+        let inset = s * 0.06
+        let tile = rect.insetBy(dx: inset, dy: inset)
+        NSBezierPath(roundedRect: tile, xRadius: s * 0.20, yRadius: s * 0.20).addClip()
+        source.draw(in: tile, from: .zero, operation: .sourceOver, fraction: 1)
+    }
+}
+
+// ── Menu-bar template: crop to glyph, alpha from luminance ─────────────────
+
+/// Bounding box of the bright glyph in unit coordinates (bottom-left origin),
+/// padded and squared so the mark scales into 18pt without distortion.
+func glyphBox() -> CGRect {
+    let probeSize = 256
+    let probe = render(width: probeSize, height: probeSize) { rect in
+        source.draw(in: rect, from: .zero, operation: .copy, fraction: 1)
+    }
+    var minX = probeSize, minY = probeSize, maxX = -1, maxY = -1
+    for row in 0..<probeSize {
+        for col in 0..<probeSize {
+            guard let c = probe.colorAt(x: col, y: row) else { continue }
+            let lum = (c.redComponent + c.greenComponent + c.blueComponent) / 3
+            if lum > 0.35 {
+                minX = min(minX, col); maxX = max(maxX, col)
+                minY = min(minY, row); maxY = max(maxY, row)
+            }
+        }
+    }
+    guard maxX >= 0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+    // Bitmap rows are top-down; unit coordinates are bottom-up.
+    var box = CGRect(x: CGFloat(minX) / CGFloat(probeSize),
+                     y: CGFloat(probeSize - 1 - maxY) / CGFloat(probeSize),
+                     width: CGFloat(maxX - minX + 1) / CGFloat(probeSize),
+                     height: CGFloat(maxY - minY + 1) / CGFloat(probeSize))
+    // Square it around the centre, with a little breathing room.
+    let side = min(1.0, max(box.width, box.height) * 1.12)
+    box = CGRect(x: max(0, min(1 - side, box.midX - side / 2)),
+                 y: max(0, min(1 - side, box.midY - side / 2)),
+                 width: side, height: side)
+    return box
+}
+
+func menuTemplate(size: Int, cropUnit: CGRect) -> NSBitmapImageRep {
+    let crop = CGRect(x: cropUnit.minX * source.size.width,
+                      y: cropUnit.minY * source.size.height,
+                      width: cropUnit.width * source.size.width,
+                      height: cropUnit.height * source.size.height)
+    let rep = render(width: size, height: size) { rect in
+        source.draw(in: rect, from: crop, operation: .copy, fraction: 1)
+    }
+    // Template images are black + alpha; macOS recolors them. Bright pixels
+    // of the logo become opaque, the dark background becomes transparent.
+    guard let data = rep.bitmapData else { fatalError("no bitmap data") }
+    let bytesPerRow = rep.bytesPerRow, samples = rep.samplesPerPixel
+    for row in 0..<size {
+        let rowPtr = data + row * bytesPerRow
+        for col in 0..<size {
+            let p = rowPtr + col * samples
+            let lum = (Int(p[0]) + Int(p[1]) + Int(p[2])) / 3
+            p[0] = 0; p[1] = 0; p[2] = 0
+            p[3] = UInt8(lum)
+        }
+    }
+    return rep
+}
+
+// ── Emit ───────────────────────────────────────────────────────────────────
 let iconset = outDir + "/AppIcon.iconset"
 try! FileManager.default.createDirectory(atPath: iconset, withIntermediateDirectories: true)
 
 for base in [16, 32, 128, 256, 512] {
-    writePNG(size: base, to: "\(iconset)/icon_\(base)x\(base).png", tile: true, monochrome: false)
-    writePNG(size: base * 2, to: "\(iconset)/icon_\(base)x\(base)@2x.png", tile: true, monochrome: false)
+    writePNG(appIcon(size: base), to: "\(iconset)/icon_\(base)x\(base).png")
+    writePNG(appIcon(size: base * 2), to: "\(iconset)/icon_\(base)x\(base)@2x.png")
 }
-writePNG(size: 18, to: outDir + "/MenuIcon.png", tile: false, monochrome: true)
-writePNG(size: 36, to: outDir + "/MenuIcon@2x.png", tile: false, monochrome: true)
-print("icons written to \(outDir)")
+let box = glyphBox()
+writePNG(menuTemplate(size: 18, cropUnit: box), to: outDir + "/MenuIcon.png")
+writePNG(menuTemplate(size: 36, cropUnit: box), to: outDir + "/MenuIcon@2x.png")
+print("icons written to \(outDir) (glyph box \(box))")

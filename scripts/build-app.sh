@@ -25,7 +25,7 @@ cp "$BUILD_DIR/FlickApp" "$APP/Contents/MacOS/Flick"
 cp "$BUILD_DIR/flick"    "$APP/Contents/Resources/flick"
 
 echo "==> Generating icons"
-swift "$ROOT/scripts/make-icons.swift" "$ROOT/build/icons"
+swift "$ROOT/scripts/make-icons.swift" "$ROOT/assets/flick.png" "$ROOT/build/icons"
 iconutil -c icns "$ROOT/build/icons/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
 cp "$ROOT/build/icons/MenuIcon.png" "$ROOT/build/icons/MenuIcon@2x.png" "$APP/Contents/Resources/"
 

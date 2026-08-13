@@ -218,10 +218,14 @@ struct InboxView: View {
     }
 }
 
-/// One running session, with hover highlight and jump-on-click.
+/// One running session, with hover highlight and jump-on-click. Right-click
+/// to shift its approvals to the terminal and back.
 private struct SessionRow: View {
     let session: SessionRecord
+    @EnvironmentObject private var broker: Broker
     @State private var hovering = false
+
+    private var inTerminal: Bool { broker.terminalOnly.contains(session.id) }
 
     var body: some View {
         Button {
@@ -234,6 +238,16 @@ private struct SessionRow: View {
                 Text(session.project)
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
+                if inTerminal {
+                    Label("in editor", systemImage: "terminal")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .labelStyle(.titleAndIcon)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Color.primary.opacity(0.08), in: Capsule())
+                        .help("Approvals go to the editor's own prompt. Right-click to bring them back.")
+                }
                 Spacer()
                 if hovering {
                     Image(systemName: "arrow.up.forward")
@@ -253,6 +267,17 @@ private struct SessionRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .contextMenu {
+            if inTerminal {
+                Button("Show approvals in Flick again") {
+                    broker.setTerminalOnly(session.id, false)
+                }
+            } else {
+                Button("Answer approvals in editor only") {
+                    broker.setTerminalOnly(session.id, true)
+                }
+            }
+        }
         .help(session.cwd)
     }
 

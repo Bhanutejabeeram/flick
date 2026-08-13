@@ -250,6 +250,19 @@ private struct SessionRow: View {
                 }
                 Spacer()
                 if hovering {
+                    Button {
+                        broker.setTerminalOnly(session.id, !inTerminal)
+                    } label: {
+                        Image(systemName: inTerminal ? "bell.slash.fill" : "terminal")
+                            .font(.system(size: 10))
+                            .foregroundStyle(inTerminal ? .primary : .secondary)
+                            .frame(width: 20, height: 20)
+                            .background(Color.primary.opacity(0.08),
+                                        in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .help(inTerminal ? "Bring approvals back to Flick"
+                                     : "Answer this session's approvals in the editor only")
                     Image(systemName: "arrow.up.forward")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.tertiary)
@@ -267,17 +280,6 @@ private struct SessionRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .contextMenu {
-            if inTerminal {
-                Button("Show approvals in Flick again") {
-                    broker.setTerminalOnly(session.id, false)
-                }
-            } else {
-                Button("Answer approvals in editor only") {
-                    broker.setTerminalOnly(session.id, true)
-                }
-            }
-        }
         .help(session.cwd)
     }
 

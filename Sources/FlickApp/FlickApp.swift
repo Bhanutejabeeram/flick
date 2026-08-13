@@ -71,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         MainActor.assumeIsolated {
             Broker.shared.start()
+            Preferences.shared.applyDefaultLaunchAtLogin()
         }
         // Tapping a notification banner cannot open a MenuBarExtra popover
         // (there is no public API for that), so it opens this floating panel

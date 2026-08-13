@@ -30,7 +30,7 @@ enum Theme {
 
     static func agentColor(_ kind: AgentKind) -> Color {
         switch kind.rawValue {
-        case "claude": return Color(red: 0.85, green: 0.45, blue: 0.30)   // coral
+        case "claude": return Color(red: 0.851, green: 0.467, blue: 0.341) // Claude terracotta
         case "codex": return Color(red: 0.25, green: 0.65, blue: 0.60)    // teal
         case "gemini": return Color(red: 0.35, green: 0.52, blue: 0.95)   // blue
         case "opencode": return Color(red: 0.55, green: 0.45, blue: 0.90) // violet
@@ -61,24 +61,69 @@ enum Theme {
     static let popoverWidth: CGFloat = 400
 }
 
+/// Claude's spark mark: eight round-capped arms radiating from the centre,
+/// long and short alternating — the shape of the real logo, drawn as a path
+/// so it stays crisp at any size.
+struct ClaudeSparkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        let arms = 8
+        for i in 0..<arms {
+            let angle = (CGFloat(i) / CGFloat(arms)) * 2 * .pi - .pi / 2
+            let length = radius * (i.isMultiple(of: 2) ? 1.0 : 0.68)
+            path.move(to: center)
+            path.addLine(to: CGPoint(x: center.x + cos(angle) * length,
+                                     y: center.y + sin(angle) * length))
+        }
+        return path
+    }
+}
+
 /// Small rounded-square glyph identifying the agent, used on cards and rows.
 struct AgentGlyph: View {
     let kind: AgentKind
     var size: CGFloat = 22
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            .fill(
-                LinearGradient(colors: [Theme.agentColor(kind).opacity(0.95),
-                                        Theme.agentColor(kind).opacity(0.70)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            )
-            .frame(width: size, height: size)
-            .overlay(
-                Image(systemName: Theme.agentSymbol(kind))
-                    .font(.system(size: size * 0.5, weight: .bold))
-                    .foregroundStyle(.white)
-            )
+        if kind.rawValue == "claude", let logo = Self.claudeLogo {
+            Image(nsImage: logo)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(
+                    LinearGradient(colors: [Theme.agentColor(kind).opacity(0.95),
+                                            Theme.agentColor(kind).opacity(0.70)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .frame(width: size, height: size)
+                .overlay(symbol)
+        }
+    }
+
+    /// The bundled Claude logo; the drawn spark below is the fallback when
+    /// running unbundled (e.g. straight from `swift run`).
+    static let claudeLogo: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "claude", withExtension: "png") else { return nil }
+        return NSImage(contentsOf: url)
+    }()
+
+    @ViewBuilder private var symbol: some View {
+        if kind.rawValue == "claude" {
+            ClaudeSparkShape()
+                .stroke(style: StrokeStyle(lineWidth: size * 0.13, lineCap: .round))
+                .foregroundStyle(.white)
+                .padding(size * 0.22)
+        } else {
+            Image(systemName: Theme.agentSymbol(kind))
+                .font(.system(size: size * 0.5, weight: .bold))
+                .foregroundStyle(.white)
+        }
     }
 }
 

@@ -58,7 +58,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
 
         guard Preferences.shared.notificationsEnabled else { return }
-        let title = request.agent.displayName
+        let title = "\(request.agent.displayName) (\(request.project))"
         let body: String
         switch request.type {
         case .approval: body = "Wants to run: \(request.message)"
@@ -75,8 +75,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
         let content = UNMutableNotificationContent()
         content.title = title
-        // Project rides in the smaller subtitle line, not the title.
-        content.subtitle = request.project
         content.body = body
         content.userInfo = ["requestID": request.id]
         switch request.type {

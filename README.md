@@ -12,9 +12,22 @@ fallback are designed for but not built (see [Roadmap](#roadmap)).
 
 ## Install
 
+### Homebrew (recommended)
+
 ```bash
-./scripts/build-app.sh          # builds build/Flick.app + ~/.local/bin/flick
-open build/Flick.app       # menu-bar icon appears; no Dock icon
+brew tap Bhanutejabeeram/tap
+brew trust Bhanutejabeeram/tap   # newer Homebrew asks once for third-party taps
+brew install --cask flick
+flick install                    # wires hooks into ~/.claude/settings.json (backs it up first)
+```
+
+First launch may need right-click → Open (the app is not notarized yet).
+
+### From source
+
+```bash
+./scripts/build-app.sh     # builds + installs /Applications/Flick.app and the flick CLI
+open /Applications/Flick.app    # menu-bar icon appears; no Dock icon
 flick install              # wires hooks into ~/.claude/settings.json (backs it up first)
 ```
 

@@ -36,6 +36,11 @@ final class Broker: ObservableObject {
     @Published private(set) var isListening = false
     @Published private(set) var lastError: String?
 
+    /// Sessions whose approvals the user shifted back to the terminal: Flick
+    /// answers their blocking requests immediately with no decision, so
+    /// Claude Code shows its own prompt and no card or banner appears here.
+    @Published private(set) var terminalOnly: Set<String> = []
+
     /// Sessions the user granted a blanket allow for this run, keyed by
     /// session id and capped at the risk level of the card the user actually
     /// clicked — a grant made on a low-risk command must not silently approve
@@ -164,12 +169,24 @@ final class Broker: ObservableObject {
         case .sessionEnd:
             store?.markSessionEnded(request.sessionID)
             sessionAllowlist.removeValue(forKey: request.sessionID)
+            terminalOnly.remove(request.sessionID)
             withdrawAll(sessionID: request.sessionID)
             refreshSessions()
             try? conn.send(.response(InboxResponse(id: request.id, decision: .ack)))
             return
         default:
             break
+        }
+
+        // Approvals shifted to the terminal: hand the question straight back
+        // so the user answers in their editor, and stay silent here.
+        if request.blocking, terminalOnly.contains(request.sessionID) {
+            store?.record(request)
+            store?.resolve(id: request.id, decision: .defer_, reply: nil)
+            try? conn.send(.response(InboxResponse(id: request.id, decision: .defer_,
+                                                   reason: reasonText(for: .defer_))))
+            refreshSessions()
+            return
         }
 
         // A blanket allow the user granted earlier in this session answers
@@ -398,11 +415,29 @@ final class Broker: ObservableObject {
     private func endDeadSession(_ sessionID: String) {
         store?.markSessionEnded(sessionID)
         sessionAllowlist.removeValue(forKey: sessionID)
+        terminalOnly.remove(sessionID)
         withdrawAll(sessionID: sessionID)
     }
 
     func refreshHistory() {
         history = store?.recentHistory(limit: 60) ?? []
+    }
+
+    /// Shift a session's approvals to the terminal (or bring them back).
+    /// Enabling also hands any cards already waiting straight back, so the
+    /// switch takes effect on the question currently on screen too.
+    func setTerminalOnly(_ sessionID: String, _ enabled: Bool) {
+        if enabled {
+            terminalOnly.insert(sessionID)
+            let waiting = pending.filter { $0.request.sessionID == sessionID && $0.request.blocking }
+            for item in waiting {
+                respond(to: item, InboxResponse(id: item.id, decision: .defer_,
+                                                reason: reasonText(for: .defer_)))
+                withdraw(id: item.id)
+            }
+        } else {
+            terminalOnly.remove(sessionID)
+        }
     }
 
     func clearSessionAllowlist() {

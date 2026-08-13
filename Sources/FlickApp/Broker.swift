@@ -372,7 +372,23 @@ final class Broker: ObservableObject {
                 endDeadSession(session.id)
             }
         }
-        sessions = live
+
+        // Collapse rows that share a live process: resuming or clearing a
+        // conversation starts a new session id inside the same agent process,
+        // and the superseded id would otherwise linger as a phantom row.
+        var newestByPID: [Int32: String] = [:]
+        var deduped: [SessionRecord] = []
+        for session in live.sorted(by: { $0.lastSeen > $1.lastSeen }) {
+            if let pid = session.origin.pid {
+                if newestByPID[pid] != nil {
+                    endDeadSession(session.id)
+                    continue
+                }
+                newestByPID[pid] = session.id
+            }
+            deduped.append(session)
+        }
+        sessions = deduped
     }
 
     /// A session found dead by the liveness sweep gets the same teardown as an

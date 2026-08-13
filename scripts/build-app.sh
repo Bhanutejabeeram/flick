@@ -23,6 +23,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BUILD_DIR/FlickApp" "$APP/Contents/MacOS/Flick"
 cp "$BUILD_DIR/flick"    "$APP/Contents/Resources/flick"
+cp "$ROOT/assets/claude.png" "$APP/Contents/Resources/claude.png"
 
 echo "==> Generating icons"
 swift "$ROOT/scripts/make-icons.swift" "$ROOT/assets/flick.png" "$ROOT/build/icons"

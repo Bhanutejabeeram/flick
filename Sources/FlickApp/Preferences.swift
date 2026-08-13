@@ -39,6 +39,16 @@ final class Preferences: ObservableObject {
     }
 
     /// Registered with the system, not UserDefaults — SMAppService is the
+    /// On for everyone by default: a menu-bar safety net that is not running
+    /// is worse than useless, because the user believes they are covered.
+    /// Applied exactly once, so turning it off afterwards is respected.
+    func applyDefaultLaunchAtLogin() {
+        let key = "launchAtLoginDefaultApplied"
+        guard !defaults.bool(forKey: key) else { return }
+        defaults.set(true, forKey: key)
+        if !launchAtLogin { launchAtLogin = true }
+    }
+
     /// source of truth, so this stays honest if the user changes it in
     /// System Settings → General → Login Items.
     var launchAtLogin: Bool {

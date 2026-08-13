@@ -321,7 +321,9 @@ enum ClaudeHook {
         var out = text
         for pattern in [
             (#"\[([^\]]*)\]\([^)]*\)"#, "$1"),   // [label](url) → label
-            (#"(\*\*|__)(.*?)\1"#, "$2"),        // **bold** / __bold__
+            // Only the ** form: stripping __bold__ would eat the double
+            // underscores in real identifiers like __init__.py.
+            (#"\*\*(.*?)\*\*"#, "$1"),           // **bold**
             (#"`([^`]*)`"#, "$1"),               // `code`
             (#"(?m)^#{1,6}\s+"#, ""),            // heading markers
             (#"(?m)^\s*[-*+]\s+"#, "• "),        // list bullets

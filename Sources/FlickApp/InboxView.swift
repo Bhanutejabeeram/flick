@@ -118,7 +118,7 @@ struct InboxView: View {
 
             Text(broker.sessions.isEmpty
                  ? "Waiting requests from your agents will show up here."
-                 : "\(broker.sessions.count) session\(broker.sessions.count == 1 ? "" : "s") running — nothing needs you.")
+                 : "\(broker.sessions.count) session\(broker.sessions.count == 1 ? "" : "s") running. Nothing needs you.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -182,12 +182,21 @@ struct InboxView: View {
             Toggle("Launch at login", isOn: Binding(
                 get: { prefs.launchAtLogin },
                 set: { prefs.launchAtLogin = $0 }))
+            if let error = prefs.launchAtLoginError {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if broker.sessionAllowCount > 0 {
-                Button("Revoke \(broker.sessionAllowCount) session allow\(broker.sessionAllowCount == 1 ? "" : "s")") {
+                Button(broker.sessionAllowCount == 1
+                       ? "Ask me again (1 session is auto-approved)"
+                       : "Ask me again (\(broker.sessionAllowCount) sessions are auto-approved)") {
                     broker.clearSessionAllowlist()
                 }
                 .controlSize(.small)
+                .help("You chose “Allow for session” earlier, so safe commands run without asking. Click to turn that off and be asked every time again.")
             }
         }
         .toggleStyle(.checkbox)

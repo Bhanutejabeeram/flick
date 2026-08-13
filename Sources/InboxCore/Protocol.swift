@@ -83,12 +83,17 @@ public enum RiskLevel: String, Codable, Sendable, Comparable {
 public struct SessionOrigin: Codable, Hashable, Sendable {
     public var tty: String?
     public var pid: Int32?
+    /// p_comm of the process `pid` referred to when captured. Liveness checks
+    /// compare it so a recycled pid is not mistaken for the original process.
+    public var processName: String?
     public var termProgram: String?
     public var bundleIdentifier: String?
 
-    public init(tty: String? = nil, pid: Int32? = nil, termProgram: String? = nil, bundleIdentifier: String? = nil) {
+    public init(tty: String? = nil, pid: Int32? = nil, processName: String? = nil,
+                termProgram: String? = nil, bundleIdentifier: String? = nil) {
         self.tty = tty
         self.pid = pid
+        self.processName = processName
         self.termProgram = termProgram
         self.bundleIdentifier = bundleIdentifier
     }
@@ -129,10 +134,12 @@ public struct SessionOrigin: Codable, Hashable, Sendable {
         // Report the agent's pid rather than the short-lived helper's, so the
         // app can still find the process after the hook exits. nil when no
         // plausible owner is found — the app then falls back to recency-based
-        // liveness, which beats declaring a live session dead.
-        let owningPID = ProcessTree.owningProcess()?.pid
+        // liveness, which beats declaring a live session dead. The name rides
+        // along so a recycled pid can be told apart from the original process.
+        let owner = ProcessTree.owningProcess()
 
-        return SessionOrigin(tty: tty, pid: owningPID, termProgram: termProgram, bundleIdentifier: bundle)
+        return SessionOrigin(tty: tty, pid: owner?.pid, processName: owner?.name,
+                             termProgram: termProgram, bundleIdentifier: bundle)
     }
 }
 

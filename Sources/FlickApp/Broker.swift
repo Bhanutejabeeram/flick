@@ -46,7 +46,8 @@ final class Broker: ObservableObject {
     /// clicked — a grant made on a low-risk command must not silently approve
     /// medium-risk ones later. Cleared when the session ends or the app
     /// quits — a session-scoped allow must never outlive the session.
-    private var sessionAllowlist: [String: RiskLevel] = [:]
+    /// @Published so the settings panel's revoke button repaints on change.
+    @Published private(set) var sessionAllowlist: [String: RiskLevel] = [:]
 
     private var server: SocketServer?
     private var store: InboxStore?
@@ -158,7 +159,8 @@ final class Broker: ObservableObject {
         // Demo cards from `flick test` are not real sessions; listing
         // them would leave a phantom row behind after the card is answered.
         if request.agent.rawValue != "test" {
-            store?.upsertSession(from: request)
+            store?.upsertSession(from: request,
+                                 updateProject: request.type == .sessionStart)
         }
 
         switch request.type {
@@ -317,9 +319,19 @@ final class Broker: ObservableObject {
     /// Drops a pending card without asking the user, recording how it ended
     /// (`defer` when the agent stopped caring, `timeout` when nobody answered
     /// in time) so history tells the truth about what happened.
+    ///
+    /// Answering the hook is not optional: a blocking request whose card
+    /// disappears without a reply leaves the agent stuck for its whole
+    /// timeout with no prompt anywhere. Flick may annoy the user; it must
+    /// never wedge a session. Writing to an already-closed connection just
+    /// fails harmlessly, so this is safe on every withdrawal path.
     private func withdraw(id: String, as decision: InboxDecision = .defer_) {
         guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
         let item = pending.remove(at: index)
+        if item.request.blocking {
+            respond(to: item, InboxResponse(id: item.id, decision: decision,
+                                            reason: reasonText(for: decision)))
+        }
         store?.resolve(id: item.id, decision: decision, reply: nil)
         notifier.withdraw(id: id)
         refreshHistory()
@@ -343,10 +355,6 @@ final class Broker: ObservableObject {
         // prompt, which is the safe outcome.
         for item in pending {
             if let expires = item.expiresAt, expires <= now {
-                if item.request.blocking {
-                    respond(to: item, InboxResponse(id: item.id, decision: .timeout,
-                                                    reason: reasonText(for: .timeout)))
-                }
                 withdraw(id: item.id, as: .timeout)
             }
         }
@@ -377,7 +385,9 @@ final class Broker: ObservableObject {
         var live: [SessionRecord] = []
         for session in candidates {
             if let pid = session.origin.pid {
-                if ProcessTree.isAlive(pid: pid) {
+                // Name-checked: a recycled pid must not keep a dead session
+                // looking alive forever.
+                if ProcessTree.isAlive(pid: pid, recordedName: session.origin.processName) {
                     live.append(session)
                 } else {
                     endDeadSession(session.id)
@@ -393,15 +403,24 @@ final class Broker: ObservableObject {
         // Collapse rows that share a live process: resuming or clearing a
         // conversation starts a new session id inside the same agent process,
         // and the superseded id would otherwise linger as a phantom row.
+        //
+        // Two guards keep this from ever killing a real session:
+        // - only pids owned by a *named agent process* are collapsed. The
+        //   no-agent fallback records a shell/login ancestor, which several
+        //   distinct sessions in one terminal can legitimately share.
+        // - a row with cards still waiting is never collapsed; someone may be
+        //   blocked on an answer.
         var newestByPID: [Int32: String] = [:]
         var deduped: [SessionRecord] = []
         for session in live.sorted(by: { $0.lastSeen > $1.lastSeen }) {
             if let pid = session.origin.pid {
-                if newestByPID[pid] != nil {
+                let collapsible = ProcessTree.isAgentProcessName(session.origin.processName)
+                    && !pending.contains { $0.request.sessionID == session.id }
+                if newestByPID[pid] != nil, collapsible {
                     endDeadSession(session.id)
                     continue
                 }
-                newestByPID[pid] = session.id
+                if newestByPID[pid] == nil { newestByPID[pid] = session.id }
             }
             deduped.append(session)
         }
@@ -430,11 +449,7 @@ final class Broker: ObservableObject {
         if enabled {
             terminalOnly.insert(sessionID)
             let waiting = pending.filter { $0.request.sessionID == sessionID && $0.request.blocking }
-            for item in waiting {
-                respond(to: item, InboxResponse(id: item.id, decision: .defer_,
-                                                reason: reasonText(for: .defer_)))
-                withdraw(id: item.id)
-            }
+            for item in waiting { withdraw(id: item.id) }
         } else {
             terminalOnly.remove(sessionID)
         }

@@ -38,17 +38,26 @@ final class Preferences: ObservableObject {
         set { objectWillChange.send(); defaults.set(newValue, forKey: Key.showFinished) }
     }
 
-    /// Registered with the system, not UserDefaults — SMAppService is the
+    /// Set when a launch-at-login change fails, so the settings panel can
+    /// say why the checkbox refused to move instead of silently snapping back.
+    @Published private(set) var launchAtLoginError: String?
+
     /// On for everyone by default: a menu-bar safety net that is not running
     /// is worse than useless, because the user believes they are covered.
-    /// Applied exactly once, so turning it off afterwards is respected.
+    /// The "applied" flag is only persisted once registration verifiably
+    /// succeeded — a failed attempt (translocated app, DMG, login items
+    /// disallowed) is retried on the next launch rather than abandoned.
+    /// Once applied, turning it off afterwards is respected.
     func applyDefaultLaunchAtLogin() {
         let key = "launchAtLoginDefaultApplied"
         guard !defaults.bool(forKey: key) else { return }
-        defaults.set(true, forKey: key)
         if !launchAtLogin { launchAtLogin = true }
+        if SMAppService.mainApp.status == .enabled {
+            defaults.set(true, forKey: key)
+        }
     }
 
+    /// Registered with the system, not UserDefaults — SMAppService is the
     /// source of truth, so this stays honest if the user changes it in
     /// System Settings → General → Login Items.
     var launchAtLogin: Bool {
@@ -61,7 +70,9 @@ final class Preferences: ObservableObject {
                 } else {
                     try SMAppService.mainApp.unregister()
                 }
+                launchAtLoginError = nil
             } catch {
+                launchAtLoginError = "Couldn't change launch at login — see System Settings → General → Login Items. (\(error.localizedDescription))"
                 NSLog("Flick: launch-at-login change failed: \(error)")
             }
         }

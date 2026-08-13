@@ -17,11 +17,11 @@ fallback are designed for but not built (see [Roadmap](#roadmap)).
 ```bash
 brew tap Bhanutejabeeram/tap
 brew trust Bhanutejabeeram/tap   # newer Homebrew asks once for third-party taps
-brew install --cask flick
+brew install --cask flick --no-quarantine
 flick install                    # wires hooks into ~/.claude/settings.json (backs it up first)
 ```
 
-First launch may need right-click → Open (the app is not notarized yet).
+The `--no-quarantine` flag skips the "Apple could not verify" warning (the app is not notarized yet).
 
 ### From source
 

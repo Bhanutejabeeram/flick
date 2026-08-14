@@ -1,35 +1,28 @@
-# Flick for macOS
+The problem
 
-## The problem
+You give a terminal coding agent like Claude Code or Codex a long task and move on — maybe you open another VS Code tab, switch to Chrome, or start browsing something else.
 
-You give Claude Code a long job and go do something else. You come back ten
-minutes later and find it has been sitting there almost the whole time, waiting
-for you to say yes to one command.
+Meanwhile, the agent reaches a permission prompt or needs your input and stops completely, waiting for you.
 
-Or you have four terminal windows open and one of them is blocked on a
-permission prompt. You have no idea which one until you go looking.
+But you’re never notified.
 
-The prompt itself is not the problem. The problem is that it lives inside a
-window you are not looking at, and nothing tells you it is there. So either you
-babysit the terminal, which defeats the point of handing work to an agent, or
-you walk away and lose ten minutes every time.
+Ten minutes later, you switch back and realize your agent has been sitting there almost the entire time waiting for one approval.
 
-## What Flick does about it
+With multiple agents and terminal sessions running, it gets even worse. You don’t know which agent is working, which one needs you, or which one has already finished unless you keep checking manually.
 
-Flick puts a small icon in your menu bar and watches every Claude Code session
-you have running.
+Coding agents should work in the background — you shouldn’t have to babysit your terminal.
 
-When one of them stops to ask permission, you get a notification with the exact
-command it wants to run. You can approve it, deny it, or type a reply, straight
-from the notification or the menu bar. You never have to find the right window
-first. When a session finishes and goes idle, you hear about that too, which is
-the other half of the problem.
+What Flick does about it
 
-If Flick is not running, or something goes wrong inside it, Claude Code just
-prompts you in the terminal like it always did. It cannot get in the way.
+Flick lives in your macOS menu bar and gives your terminal coding agents a way to reach you.
 
-Status: **v1, Claude Code adapter working end to end.** Codex and the PTY
-fallback are designed for but not built (see [Roadmap](#roadmap)).
+The moment an agent needs permission or input, Flick notifies you and shows exactly what it’s waiting for.
+
+Approve it, deny it, or reply directly from Flick — without switching back to your terminal or hunting through different windows.
+
+When an agent finishes, Flick lets you know that too.
+
+You keep doing your thing. Flick brings you back only when your agents need you.
 
 ## Install
 

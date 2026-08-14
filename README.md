@@ -1,6 +1,6 @@
 The problem
 
-You give a terminal coding agent like Claude Code or Codex a long task and move on — maybe you open another VS Code tab, switch to Chrome, or start browsing something else.
+You give a terminal coding agent like Claude Code or Codex a long task and move on. Maybe you open another VS Code tab, switch to Chrome, or start browsing something else.
 
 Meanwhile, the agent reaches a permission prompt or needs your input and stops completely, waiting for you.
 
@@ -10,7 +10,7 @@ Ten minutes later, you switch back and realize your agent has been sitting there
 
 With multiple agents and terminal sessions running, it gets even worse. You don’t know which agent is working, which one needs you, or which one has already finished unless you keep checking manually.
 
-Coding agents should work in the background — you shouldn’t have to babysit your terminal.
+Coding agents should work in the background. You shouldn’t have to babysit your terminal.
 
 What Flick does about it
 
@@ -18,7 +18,7 @@ Flick lives in your macOS menu bar and gives your terminal coding agents a way t
 
 The moment an agent needs permission or input, Flick notifies you and shows exactly what it’s waiting for.
 
-Approve it, deny it, or reply directly from Flick — without switching back to your terminal or hunting through different windows.
+Approve it, deny it, or reply directly from Flick without switching back to your terminal or hunting through different windows.
 
 When an agent finishes, Flick lets you know that too.
 

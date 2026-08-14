@@ -25,6 +25,20 @@ struct PendingItem: Identifiable, Equatable {
     }
 }
 
+/// One line of the agent dashboard: a session, what it is doing, and how long
+/// it has been doing it.
+struct AgentStatusRow: Identifiable, Equatable {
+    var session: SessionRecord
+    var status: SessionStatus
+    /// The file the agent last had its hands on, relative to the project root.
+    var target: String?
+    /// The session has gone away and is only still on screen so the user sees
+    /// it finish rather than watching a row vanish mid-glance.
+    var isEnded: Bool
+
+    var id: String { session.id }
+}
+
 /// Tracks sessions, pending approvals, responses, expiry, and deduplication.
 @MainActor
 final class Broker: ObservableObject {
@@ -49,6 +63,24 @@ final class Broker: ObservableObject {
     /// @Published so the settings panel's revoke button repaints on change.
     @Published private(set) var sessionAllowlist: [String: RiskLevel] = [:]
 
+    /// What each session is doing, keyed by session id, with the moment it
+    /// started doing it. Kept in memory rather than in SQLite on purpose: a
+    /// status is only true while the app is watching, and a "Working · 3h"
+    /// restored from disk after a restart would be a guess dressed as a fact.
+    @Published private(set) var statuses: [String: SessionStatus] = [:]
+
+    /// The file each session last touched. Sticky on purpose: between two edits
+    /// an agent runs tools that name no file, and blanking the line every time
+    /// would make it flicker rather than inform.
+    @Published private(set) var targets: [String: String] = [:]
+
+    /// Sessions that have gone away, held briefly so the user sees them land on
+    /// "Finished" instead of watching the row disappear from under the cursor.
+    private var ended: [String: (session: SessionRecord, at: Date)] = [:]
+
+    /// How long an ended session stays on the dashboard before it is dropped.
+    private let finishedGrace: TimeInterval = 30
+
     private var server: SocketServer?
     private var store: InboxStore?
     private var expiryTimer: Timer?
@@ -62,6 +94,70 @@ final class Broker: ObservableObject {
 
     var highestPendingRisk: RiskLevel? {
         pending.filter { $0.request.type.isActionable }.map(\.request.risk).max()
+    }
+
+    // MARK: - Dashboard
+
+    /// Every session worth showing: whatever has stopped for the user first,
+    /// then whatever is running, then anything on its way out.
+    ///
+    /// Within a status the order is by most recent activity, so a row only ever
+    /// moves when its status genuinely changed — not merely because another
+    /// session did something.
+    var agentRows: [AgentStatusRow] {
+        let live = sessions.map {
+            AgentStatusRow(session: $0, status: status(of: $0),
+                           target: targets[$0.id], isEnded: false)
+        }
+        .sorted {
+            let (a, b) = ($0.status.activity.sortPriority, $1.status.activity.sortPriority)
+            return a == b ? $0.session.lastSeen > $1.session.lastSeen : a < b
+        }
+
+        let liveIDs = Set(sessions.map(\.id))
+        let lingering = ended.values
+            .filter { !liveIDs.contains($0.session.id) }
+            .sorted { $0.at > $1.at }
+            .map {
+                AgentStatusRow(session: $0.session,
+                               status: statuses[$0.session.id] ?? SessionStatus(.finished, since: $0.at),
+                               target: targets[$0.session.id], isEnded: true)
+            }
+        return live + lingering
+    }
+
+    /// The recorded status, or a sensible stand-in for a session restored from
+    /// the database before any event of ours has been seen for it.
+    private func status(of session: SessionRecord) -> SessionStatus {
+        statuses[session.id] ?? SessionStatus(.working, since: session.lastSeen)
+    }
+
+    /// Applies a transition, leaving the clock alone when nothing actually
+    /// changed. Restarting `since` on every repeat event would peg every
+    /// duration near zero and make the whole column useless.
+    private func noteStatus(_ request: InboxRequest, awaitingUser: Bool) {
+        guard request.agent.rawValue != "test" else { return }
+        if let target = request.target, !target.isEmpty {
+            targets[request.sessionID] = target
+        }
+        guard let next = SessionStatus.transition(for: request, awaitingUser: awaitingUser) else { return }
+        apply(next, to: request.sessionID)
+    }
+
+    private func apply(_ next: SessionStatus, to sessionID: String) {
+        if let current = statuses[sessionID], current.supersedes(next) { return }
+        statuses[sessionID] = next
+    }
+
+    /// Back to work once nothing from this session is waiting on the user.
+    ///
+    /// Only ever lifts a session out of ``SessionActivity/waiting``: a session
+    /// that finished or died also sheds its cards, and letting that path
+    /// rewrite the status would report a dead session as working.
+    private func resumeIfIdle(_ sessionID: String) {
+        guard statuses[sessionID]?.activity == .waiting else { return }
+        guard !pending.contains(where: { $0.request.sessionID == sessionID }) else { return }
+        statuses[sessionID] = SessionStatus(.working)
     }
 
     // MARK: - Lifecycle
@@ -166,14 +262,14 @@ final class Broker: ObservableObject {
 
         switch request.type {
         case .sessionStart:
+            noteStatus(request, awaitingUser: false)
             refreshSessions()
             try? conn.send(.response(InboxResponse(id: request.id, decision: .ack)))
             return
         case .sessionEnd:
-            store?.markSessionEnded(request.sessionID)
-            sessionAllowlist.removeValue(forKey: request.sessionID)
-            terminalOnly.remove(request.sessionID)
-            withdrawAll(sessionID: request.sessionID)
+            // Same teardown the liveness sweep performs, including the grace
+            // period that keeps the row on screen for a moment.
+            endSession(request.sessionID)
             refreshSessions()
             try? conn.send(.response(InboxResponse(id: request.id, decision: .ack)))
             return
@@ -188,6 +284,12 @@ final class Broker: ObservableObject {
             store?.resolve(id: request.id, decision: .defer_, reply: nil)
             try? conn.send(.response(InboxResponse(id: request.id, decision: .defer_,
                                                    reason: reasonText(for: .defer_))))
+            // Flick is out of the loop for this session, and gets no event when
+            // the user answers in the terminal. A "Waiting" that could only be
+            // cleared by the *next* event would sit there stale, so these
+            // sessions are reported as working and the "in editor" tag on the
+            // row is what says where their prompts went.
+            noteStatus(request, awaitingUser: false)
             refreshSessions()
             return
         }
@@ -203,6 +305,9 @@ final class Broker: ObservableObject {
             store?.resolve(id: request.id, decision: .allow, reply: nil)
             try? conn.send(.response(InboxResponse(id: request.id, decision: .allow,
                                                    reason: "allowed for this session")))
+            // Answered without the user ever seeing it, so the agent never
+            // stopped working.
+            noteStatus(request, awaitingUser: false)
             refreshHistory()
             return
         }
@@ -241,6 +346,8 @@ final class Broker: ObservableObject {
             store?.resolve(id: request.id, decision: .ack, reply: nil)
         }
 
+        noteStatus(request, awaitingUser: request.type.isActionable)
+
         if !request.blocking {
             try? conn.send(.response(InboxResponse(id: request.id, decision: .ack)))
         }
@@ -273,6 +380,8 @@ final class Broker: ObservableObject {
         notifier.withdraw(id: id)
         refreshHistory()
 
+        // The agent has its answer and is moving again.
+        resumeIfIdle(item.request.sessionID)
         refreshSessions()
     }
 
@@ -336,6 +445,7 @@ final class Broker: ObservableObject {
         store?.resolve(id: item.id, decision: decision, reply: nil)
         notifier.withdraw(id: id)
         refreshHistory()
+        resumeIfIdle(item.request.sessionID)
     }
 
     private func withdrawAll(on conn: SocketConnection) {
@@ -361,6 +471,19 @@ final class Broker: ObservableObject {
         }
         // Drop dedupe keys we no longer need.
         recentNotificationKeys = recentNotificationKeys.filter { now.timeIntervalSince($0.value) < 60 }
+
+        // Retire finished sessions once the user has had a moment to see them,
+        // and drop the statuses of sessions nothing refers to any more.
+        let expired = Array(ended.filter { now.timeIntervalSince($0.value.at) >= finishedGrace }.keys)
+        if !expired.isEmpty {
+            // `ended` is not @Published, so the change is announced by hand —
+            // before the mutation, which is the order SwiftUI expects.
+            objectWillChange.send()
+            for id in expired { ended.removeValue(forKey: id) }
+            let known = Set(sessions.map(\.id)).union(ended.keys)
+            statuses = statuses.filter { known.contains($0.key) }
+            targets = targets.filter { known.contains($0.key) }
+        }
 
         // Re-check session liveness every few seconds so closed terminals
         // disappear from the list without waiting for a new event. The check
@@ -391,13 +514,13 @@ final class Broker: ObservableObject {
                 if ProcessTree.isAlive(pid: pid, recordedName: session.origin.processName) {
                     live.append(session)
                 } else {
-                    endDeadSession(session.id)
+                    endSession(session.id)
                 }
             } else if Date().timeIntervalSince(session.lastSeen) < 1800 {
                 // No pid to check: fall back to "seen recently".
                 live.append(session)
             } else {
-                endDeadSession(session.id)
+                endSession(session.id)
             }
         }
 
@@ -418,7 +541,7 @@ final class Broker: ObservableObject {
                 let collapsible = ProcessTree.isAgentProcessName(session.origin.processName)
                     && !pending.contains { $0.request.sessionID == session.id }
                 if newestByPID[pid] != nil, collapsible {
-                    endDeadSession(session.id)
+                    endSession(session.id, linger: false)
                     continue
                 }
                 if newestByPID[pid] == nil { newestByPID[pid] = session.id }
@@ -428,11 +551,27 @@ final class Broker: ObservableObject {
         sessions = deduped
     }
 
-    /// A session found dead by the liveness sweep gets the same teardown as an
-    /// explicit "session ended" event: its cards are withdrawn (non-blocking
-    /// questions have no expiry and would otherwise linger forever) and its
-    /// allow grant is revoked.
-    private func endDeadSession(_ sessionID: String) {
+    /// Tears a session down, whether it said goodbye or the liveness sweep
+    /// caught it: its cards are withdrawn (non-blocking questions have no
+    /// expiry and would otherwise linger forever), its allow grant is revoked,
+    /// and a copy is kept for ``finishedGrace`` so the dashboard can show it
+    /// finishing instead of blinking out.
+    /// `linger` is false for a session being collapsed into a newer one on the
+    /// same process. That row is a phantom left behind by a resume or a
+    /// `/clear`, not a session that ended, and parking it on the dashboard as
+    /// "Finished" would put back the duplicate the collapse exists to remove.
+    private func endSession(_ sessionID: String, linger: Bool = true) {
+        // Snapshot the row before the store marks it inactive — once it is out
+        // of `sessions` there is nothing left to render during the grace period.
+        if linger,
+           let record = sessions.first(where: { $0.id == sessionID }) ?? store?.session(id: sessionID) {
+            objectWillChange.send()   // `ended` is not @Published.
+            ended[sessionID] = (record, Date())
+        }
+        // Settle the status *before* withdrawing cards. Withdrawal lifts a
+        // waiting session back to working, and a session that just died must
+        // never be reported as running.
+        apply(SessionStatus(.finished), to: sessionID)
         store?.markSessionEnded(sessionID)
         sessionAllowlist.removeValue(forKey: sessionID)
         terminalOnly.remove(sessionID)

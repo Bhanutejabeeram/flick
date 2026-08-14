@@ -70,6 +70,7 @@ enum ClaudeHook {
             sessionID: input["session_id"] as? String ?? "unknown",
             project: ProjectNaming.projectName(for: cwd),
             cwd: cwd,
+            target: targetPath(toolName: toolName, toolInput: toolInput, cwd: cwd),
             type: .approval,
             title: toolName,
             message: summary.message,
@@ -106,6 +107,31 @@ enum ClaudeHook {
     }
 
     private static let editTools: Set<String> = ["Write", "Edit", "MultiEdit", "NotebookEdit"]
+
+    /// The file this call is about, relative to the project root, so the
+    /// dashboard can say which file the agent has its hands on rather than only
+    /// which project. Nil for tools that touch no single file — a Bash command
+    /// can span a dozen paths or none, and guessing one would be worse than
+    /// showing nothing.
+    private static func targetPath(toolName: String, toolInput: [String: Any], cwd: String) -> String? {
+        let raw: String?
+        switch toolName {
+        case "Write", "Edit", "MultiEdit": raw = toolInput["file_path"] as? String
+        case "NotebookEdit": raw = toolInput["notebook_path"] as? String
+        default: raw = nil
+        }
+        guard let raw, !raw.isEmpty else { return nil }
+        return relativize(raw, to: cwd)
+    }
+
+    /// Trims the project root off a path, falling back to `~` for anything
+    /// outside it. The row is narrow; the leading directories are the part
+    /// nobody needs.
+    private static func relativize(_ path: String, to cwd: String) -> String {
+        let base = cwd.hasSuffix("/") ? cwd : cwd + "/"
+        if path.hasPrefix(base) { return String(path.dropFirst(base.count)) }
+        return displayPath(path)
+    }
 
     /// Whether the call explicitly opts out of the sandbox, which makes Claude
     /// Code prompt however the allow list reads.
@@ -171,8 +197,9 @@ enum ClaudeHook {
         // otherwise classify from the text — and never degrade a real
         // notification into a generic "unknown" error card.
         let kind = input["notification_type"] as? String
-        let text = (input["message"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Flattened on the way in: this text goes straight to a banner, which
+        // renders no markdown at all.
+        let text = PlainText.fromMarkdown((input["message"] as? String) ?? "")
         let cwd = input["cwd"] as? String ?? FileManager.default.currentDirectoryPath
         let sessionID = input["session_id"] as? String ?? "unknown"
 
@@ -228,9 +255,9 @@ enum ClaudeHook {
         if input["stop_hook_active"] as? Bool == true { return 0 }
 
         let cwd = input["cwd"] as? String ?? FileManager.default.currentDirectoryPath
-        let last = (input["last_assistant_message"] as? String) ?? ""
+        let last = PlainText.fromMarkdown((input["last_assistant_message"] as? String) ?? "")
         let summary = last.isEmpty ? "Claude Code finished its turn."
-                                   : condense(stripMarkdown(last), limit: 220)
+                                   : PlainText.truncate(last, limit: 220)
 
         let request = InboxRequest(
             agent: .claude,
@@ -327,27 +354,6 @@ enum ClaudeHook {
     private static func displayPath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
-
-    /// Notifications render plain text, so markdown markers read as noise
-    /// ("**bold**" shows its asterisks). Strip the common inline markers and
-    /// collapse links to their label; this is display-only, never shown for
-    /// commands the user approves.
-    private static func stripMarkdown(_ text: String) -> String {
-        var out = text
-        for pattern in [
-            (#"\[([^\]]*)\]\([^)]*\)"#, "$1"),   // [label](url) → label
-            // Only the ** form: stripping __bold__ would eat the double
-            // underscores in real identifiers like __init__.py.
-            (#"\*\*(.*?)\*\*"#, "$1"),           // **bold**
-            (#"`([^`]*)`"#, "$1"),               // `code`
-            (#"(?m)^#{1,6}\s+"#, ""),            // heading markers
-            (#"(?m)^\s*[-*+]\s+"#, "• "),        // list bullets
-        ] {
-            out = out.replacingOccurrences(of: pattern.0, with: pattern.1,
-                                           options: .regularExpression)
-        }
-        return out
     }
 
     private static func condense(_ text: String, limit: Int) -> String {

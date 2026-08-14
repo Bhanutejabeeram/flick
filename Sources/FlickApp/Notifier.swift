@@ -71,17 +71,28 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
         guard Preferences.shared.notificationsEnabled else { return }
         let title = "\(request.agent.displayName) (\(request.project))"
+        // A banner renders no markdown and treats a newline as the end of the
+        // message, so prose is flattened onto one line before it goes out.
+        // Commands are only squeezed, never rewritten — what the user approves
+        // has to be what the agent asked for.
         let body: String
         switch request.type {
-        case .approval: body = "Wants to run: \(request.message)"
-        case .question: body = request.message
-        case .finished: body = request.message.isEmpty ? "Finished and waiting for you." : request.message
-        case .error: body = request.message
+        case .approval:
+            body = "Wants to run: " + PlainText.truncate(
+                request.message.replacingOccurrences(of: "\n", with: " "), limit: 220)
+        case .question:
+            body = PlainText.singleLine(request.message)
+        case .finished:
+            body = request.message.isEmpty
+                ? "Finished and waiting for you."
+                : PlainText.singleLine(request.message)
+        case .error:
+            body = PlainText.singleLine(request.message)
         case .sessionStart, .sessionEnd: return
         }
 
         guard hasBundle else {
-            fallbackBanner(title: title, body: body)
+            fallbackBanner(title: title, body: PlainText.singleLine(body, limit: 200))
             return
         }
 

@@ -47,18 +47,108 @@ enum Theme {
         }
     }
 
+    // MARK: - Shared metrics
+
+    /// Two alignment rails, and nothing between them.
+    ///
+    /// `gutter` is the left edge of every structural element — cards, row
+    /// backgrounds, section headings, the footer. `boxInset` is the padding
+    /// inside those boxes, so all *content* lines up on a second rail at
+    /// `gutter + boxInset`. Every padding value in the popover is one of these
+    /// two; the drifting 7/9/13/14/16 mix that came before is what made things
+    /// look a pixel off without it being obvious why.
+    static let gutter: CGFloat = 14
+    static let boxInset: CGFloat = 12
+
+    static let cardCorner: CGFloat = 12
+    /// Buttons and small controls. Soft, but a rectangle rather than a pill —
+    /// capsules at this size read as decoration.
+    static let controlCorner: CGFloat = 7
+    static let popoverWidth: CGFloat = 400
+
+    // MARK: - Risk
+
+    /// Risk is the one place colour survives, and only at the top of the scale.
+    ///
+    /// Everything else in the popover is monochrome, which is precisely what
+    /// makes this readable: if something is red, it is destructive. Low and
+    /// medium carry no colour at all, because a UI where three things glow is a
+    /// UI where none of them mean anything.
     static func riskColor(_ risk: RiskLevel) -> Color {
         switch risk {
-        case .low: return .green
-        case .medium: return .orange
+        case .low, .medium: return .secondary
         case .high: return .red
         }
     }
+}
 
-    // MARK: - Shared metrics
+/// A quiet left-to-right sheen that loops while a session is working.
+///
+/// This is how a working session announces itself now that the status dots are
+/// gone: motion means running, stillness means stopped, and it reads from the
+/// corner of the eye without a single colour being involved.
+///
+/// The lifecycle here is the whole point, and getting it wrong crashed the app
+/// once already. A `repeatForever` animation keeps driving updates into its
+/// hosting view for as long as it runs, and a menu-bar popover's window is torn
+/// down the moment the popover closes. Left running, the animation asks a
+/// window that is going away to update its constraints, AppKit raises, and the
+/// uncaught exception takes the status item down with it — the process survives
+/// but the icon vanishes. So: it starts on appear, it stops on disappear, and
+/// it never restarts itself while off screen.
+struct ShimmerText: View {
+    let text: String
+    var font: Font = .system(size: 11)
+    /// Still text for anything that is not moving, so the effect is never
+    /// merely decorative.
+    var animated: Bool = true
 
-    static let cardCorner: CGFloat = 12
-    static let popoverWidth: CGFloat = 400
+    @State private var sweeping = false
+    @State private var onScreen = false
+
+    private var running: Bool { animated && onScreen && sweeping }
+
+    var body: some View {
+        Text(text)
+            .font(font)
+            .foregroundStyle(.secondary)
+            .overlay { if running { sheen } }
+            .onAppear { onScreen = true; sync() }
+            .onDisappear { onScreen = false; stop() }
+            .onChange(of: animated) { _, _ in sync() }
+    }
+
+    private func sync() { animated && onScreen ? start() : stop() }
+
+    private func start() {
+        guard !sweeping else { return }   // never stack a second loop
+        sweeping = true
+    }
+
+    private func stop() {
+        sweeping = false
+    }
+
+    /// The sweep itself. Its animation is attached to this subview rather than
+    /// started imperatively, so tearing the subview down takes the animation
+    /// with it instead of leaving it running against a dead window.
+    private var sheen: some View {
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: false)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: 2.2) / 2.2
+
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: Color.primary.opacity(0.9), location: 0.5),
+                    .init(color: .clear, location: 1),
+                ],
+                startPoint: UnitPoint(x: t * 2.2 - 1.1, y: 0.5),
+                endPoint: UnitPoint(x: t * 2.2 - 0.5, y: 0.5))
+        }
+        .mask(Text(text).font(font))
+        .allowsHitTesting(false)
+    }
 }
 
 /// Claude's spark mark: eight round-capped arms radiating from the centre,
@@ -127,14 +217,20 @@ struct AgentGlyph: View {
     }
 }
 
-/// Capsule action button with a hover state; macOS's stock bordered buttons
-/// look out of place in a menu-bar popover.
+/// The popover's only button.
+///
+/// One accent colour throughout, with emphasis carried by fill rather than by
+/// hue — a filled button, a tinted one, and a bare one. Colour-coding each
+/// action separately (a blue Allow beside a red Deny beside a grey third
+/// option) is what made the row look like a toy.
 struct ActionButton: View {
     enum Kind {
-        case primary      // Allow — filled accent
-        case destructive  // Deny — red tint
-        case neutral      // Allow for session, etc.
-        case quiet        // Not now
+        /// The action you most likely want. Solid accent.
+        case primary
+        /// Everything else with a background. Tinted accent.
+        case secondary
+        /// Text only, for the way out.
+        case quiet
     }
 
     let title: String
@@ -147,11 +243,12 @@ struct ActionButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 11.5, weight: kind == .primary ? .semibold : .medium))
-                .padding(.horizontal, kind == .quiet ? 6 : 11)
-                .padding(.vertical, 5)
-                .background(background, in: Capsule())
+                .padding(.horizontal, kind == .quiet ? 8 : 12)
+                .padding(.vertical, 5.5)
+                .background(background,
+                            in: RoundedRectangle(cornerRadius: Theme.controlCorner, style: .continuous))
                 .foregroundStyle(foreground)
-                .contentShape(Capsule())
+                .contentShape(RoundedRectangle(cornerRadius: Theme.controlCorner, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -160,19 +257,17 @@ struct ActionButton: View {
 
     private var background: Color {
         switch kind {
-        case .primary: return hovering ? Color.accentColor : Color.accentColor.opacity(0.85)
-        case .destructive: return Color.red.opacity(hovering ? 0.22 : 0.13)
-        case .neutral: return Color.primary.opacity(hovering ? 0.14 : 0.08)
-        case .quiet: return hovering ? Color.primary.opacity(0.07) : .clear
+        case .primary: return Color.accentColor.opacity(hovering ? 1 : 0.88)
+        case .secondary: return Color.accentColor.opacity(hovering ? 0.20 : 0.12)
+        case .quiet: return Color.accentColor.opacity(hovering ? 0.10 : 0)
         }
     }
 
     private var foreground: Color {
         switch kind {
         case .primary: return .white
-        case .destructive: return .red
-        case .neutral: return .primary
-        case .quiet: return .secondary
+        case .secondary: return .accentColor
+        case .quiet: return hovering ? .accentColor : .secondary
         }
     }
 }

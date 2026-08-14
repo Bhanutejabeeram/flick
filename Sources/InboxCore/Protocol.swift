@@ -197,6 +197,11 @@ public struct InboxRequest: Codable, Identifiable, Hashable, Sendable {
     public var sessionID: String
     public var project: String
     public var cwd: String
+    /// The file or folder this event is about, relative to the project root —
+    /// "Sources/FlickApp/Broker.swift". Optional because plenty of events are
+    /// about no file in particular, and because adapters written against an
+    /// older build simply omit it.
+    public var target: String?
     public var type: RequestType
     /// Short headline, e.g. the tool name.
     public var title: String
@@ -222,6 +227,7 @@ public struct InboxRequest: Codable, Identifiable, Hashable, Sendable {
                 sessionID: String,
                 project: String,
                 cwd: String,
+                target: String? = nil,
                 type: RequestType,
                 title: String,
                 message: String,
@@ -238,6 +244,7 @@ public struct InboxRequest: Codable, Identifiable, Hashable, Sendable {
         self.sessionID = sessionID
         self.project = project
         self.cwd = cwd
+        self.target = target
         self.type = type
         self.title = title
         self.message = message
@@ -252,7 +259,7 @@ public struct InboxRequest: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case v, id, agent, type, title, message, detail, actions, risk, blocking, origin, project, cwd, channel
+        case v, id, agent, type, title, message, detail, actions, risk, blocking, origin, project, cwd, target, channel
         case sessionID = "session_id"
         case timeoutMS = "timeout_ms"
         case createdAt = "created_at"

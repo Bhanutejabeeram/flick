@@ -92,9 +92,10 @@ final class Broker: ObservableObject {
         notifier.onAction = { [weak self] id, decision in
             Task { @MainActor in self?.resolve(id: id, decision: decision, reply: nil) }
         }
-        notifier.onAuthStatus = { [weak self] granted in
+        notifier.onAuthStatus = { [weak self] granted, detail in
             if !granted {
-                self?.lastError = "Banners are off — enable Flick in System Settings → Notifications. The menu-bar badge and sound still work."
+                let hint = detail.map { " (\($0))" } ?? ""
+                self?.lastError = "Banners are off — enable Flick in System Settings → Notifications\(hint). The menu-bar badge and sound still work."
             }
         }
 

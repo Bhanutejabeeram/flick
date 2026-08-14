@@ -12,8 +12,9 @@ import UserNotifications
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Called when the user hits a button on the banner itself.
     var onAction: ((String, InboxDecision) -> Void)?
-    /// Called with the authorization outcome so the UI can explain missing banners.
-    var onAuthStatus: ((Bool) -> Void)?
+    /// Called with the authorization outcome, plus the system's own reason when
+    /// it refused, so the UI can explain missing banners instead of guessing.
+    var onAuthStatus: ((Bool, String?) -> Void)?
 
     private let hasBundle = Bundle.main.bundleIdentifier != nil
     private var authorized = false
@@ -42,19 +43,30 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                                           actions: [], intentIdentifiers: [], options: [])
         center.setNotificationCategories([approval, question, info])
 
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, _ in
-            self?.authorized = granted
-            DispatchQueue.main.async { self?.onAuthStatus?(granted) }
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, error in
+            // requestAuthorization can fail without ever asking the user —
+            // notably for ad-hoc signed apps that Notification Center refuses
+            // to register. Report the OS's reason, not just a boolean, or the
+            // UI ends up telling the user to flip a switch that does not exist.
+            let detail = error.map { ($0 as NSError).localizedDescription }
+            NSLog("Flick: notification auth granted=%d error=%@", granted, detail ?? "none")
+            DispatchQueue.main.async {
+                self?.authorized = granted
+                self?.onAuthStatus?(granted, detail)
+            }
         }
     }
 
     func notify(_ request: InboxRequest) {
-        // Played by the app itself: notification-center sound only works when
-        // the user has granted (and not muted) notification permission, and
-        // `.defaultCritical` is silently dropped without a special
-        // entitlement. An in-app chime works regardless.
-        if Preferences.shared.soundEnabled, request.type.isActionable {
-            NSSound(named: request.risk == .high ? "Sosumi" : "Glass")?.play()
+        // Played by the app rather than attached to the banner. A banner sound
+        // is swallowed by any Do Not Disturb — including the automatic DND
+        // macOS applies while the display sleeps, which is exactly when the
+        // user has stepped away from a running agent and most needs to hear
+        // this. Breaking through that properly needs the time-sensitive
+        // entitlement, which an ad-hoc signed build cannot carry, so play the
+        // sound directly: plain audio ignores DND entirely.
+        if Preferences.shared.soundEnabled, request.type.deservesSound {
+            Notifier.playChime(for: request)
         }
 
         guard Preferences.shared.notificationsEnabled else { return }
@@ -89,14 +101,45 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         default:
             content.categoryIdentifier = Category.info
         }
-        // Sound comes from the in-app chime above; adding it here too would
-        // double-ping when notification permission is granted.
+        // No `content.sound`: the chime above already played, and a banner
+        // sound would double-ping whenever DND happens to be off.
         if request.type.isActionable {
             content.interruptionLevel = .timeSensitive
         }
 
         let req = UNNotificationRequest(identifier: request.id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
+    }
+
+    // MARK: - Chime
+
+    /// A distinct sound per event, so the reason for the alert is audible
+    /// without looking: the user's own system alert sound when a decision is
+    /// needed (Flick should sound like the rest of the Mac), a softer chime
+    /// when a run finishes, and something unmistakable for destructive
+    /// commands and errors.
+    private static func playChime(for request: InboxRequest) {
+        switch request.type {
+        case .approval where request.risk == .high: play("Sosumi")
+        case .approval, .question: NSSound.beep()
+        case .finished: play("Glass")
+        case .error: play("Basso")
+        case .sessionStart, .sessionEnd: break
+        }
+    }
+
+    /// `NSSound(named:)` hands back AppKit's shared instance for that name, and
+    /// `play()` on one that is already playing returns false without
+    /// restarting — so a second alert arriving mid-chime would be silent
+    /// unless it is stopped first.
+    private static func play(_ name: String) {
+        guard let sound = NSSound(named: name) else {
+            // A missing system sound file must never cost the user the alert.
+            NSSound.beep()
+            return
+        }
+        if sound.isPlaying { sound.stop() }
+        sound.play()
     }
 
     func withdraw(id: String) {

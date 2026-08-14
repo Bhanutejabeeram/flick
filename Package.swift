@@ -19,5 +19,10 @@ let package = Package(
             dependencies: ["InboxCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "FlickTests",
+            dependencies: ["InboxCore", "flick", "FlickApp"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

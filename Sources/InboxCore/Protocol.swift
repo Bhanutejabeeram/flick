@@ -47,6 +47,18 @@ public enum RequestType: String, Codable, Sendable {
         case .finished, .error, .sessionStart, .sessionEnd: return false
         }
     }
+
+    /// Whether the event is worth an audible alert.
+    ///
+    /// Deliberately wider than ``isActionable``: a finished run is the event
+    /// the user walked away for, so it has to be audible even though it needs
+    /// no decision. Only bookkeeping stays silent.
+    public var deservesSound: Bool {
+        switch self {
+        case .approval, .question, .finished, .error: return true
+        case .sessionStart, .sessionEnd: return false
+        }
+    }
 }
 
 public enum InboxAction: String, Codable, Sendable, CaseIterable {

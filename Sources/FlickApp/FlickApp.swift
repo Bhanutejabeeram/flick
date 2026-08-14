@@ -84,11 +84,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor private func showInboxPanel() {
-        if let panel = inboxPanel {
-            panel.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
+        // First open is exactly "no panel yet" — deriving it beats a second
+        // stored flag that has to be kept in sync with the panel's lifetime.
+        let firstOpen = inboxPanel == nil
+        let panel = inboxPanel ?? makeInboxPanel()
+        inboxPanel = panel
+        place(panel, firstOpen: firstOpen)
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor private func makeInboxPanel() -> NSPanel {
         let host = NSHostingController(rootView: InboxView().environmentObject(Broker.shared))
         let panel = NSPanel(contentViewController: host)
         panel.styleMask = [.titled, .closable, .fullSizeContentView, .utilityWindow]
@@ -99,14 +105,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.level = .floating
         panel.isReleasedWhenClosed = false
         panel.isMovableByWindowBackground = true
-        if let screen = NSScreen.main {
-            let size = host.view.fittingSize
-            panel.setFrameTopLeftPoint(NSPoint(x: screen.visibleFrame.maxX - max(size.width, 400) - 16,
-                                               y: screen.visibleFrame.maxY - 8))
-        }
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        inboxPanel = panel
+        // Ongoing resizes and moves are handled by the WindowClamper riding
+        // inside InboxView, which covers this panel and the menu-bar popover
+        // alike.
+        return panel
+    }
+
+    /// Puts the panel where it belongs before it is shown.
+    ///
+    /// On first open it is anchored under the menu bar on the right, near the
+    /// status item it belongs to. After that its position is the user's — a
+    /// reopen only pulls it back if it has drifted out of view, which happens
+    /// when the display it was on goes away.
+    @MainActor private func place(_ panel: NSPanel, firstOpen: Bool) {
+        // Lay out first. Reading the size before this gives the placeholder
+        // frame, which is what put the panel in the wrong spot to begin with.
+        panel.layoutIfNeeded()
+        // A brand-new panel sits at AppKit's default frame on the primary
+        // display, so its own frame cannot say which screen the user means.
+        let screen = firstOpen
+            ? (PanelPlacement.screenUnderCursor() ?? PanelPlacement.screen(for: panel))
+            : PanelPlacement.screen(for: panel)
+        guard let visible = screen?.visibleFrame else { return }
+        let frame = firstOpen
+            ? PanelPlacement.anchored(panel.frame, in: visible)
+            : PanelPlacement.clamped(panel.frame, in: visible)
+        guard !frame.equalTo(panel.frame) else { return }
+        panel.setFrame(frame, display: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

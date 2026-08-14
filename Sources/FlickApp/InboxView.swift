@@ -66,6 +66,9 @@ struct InboxView: View {
         .frame(width: Theme.popoverWidth)
         // Translucent HUD material, like the system menu-bar panels.
         .background(VisualEffectBackground().ignoresSafeArea())
+        // Keeps whichever window is hosting this view on screen — see
+        // WindowClamper for why the popover in particular needs it.
+        .background(WindowClamper())
     }
 
     // MARK: - Header

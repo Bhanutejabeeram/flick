@@ -108,7 +108,7 @@ public struct SessionOrigin: Codable, Hashable, Sendable {
         let env = ProcessInfo.processInfo.environment
 
         let tty: String?
-        if let override = env["AGENT_INBOX_TTY"], !override.isEmpty {
+        if let override = env["FLICK_TTY"], !override.isEmpty {
             tty = override
         } else if isatty(0) == 1, let name = ttyname(0) {
             tty = String(cString: name)

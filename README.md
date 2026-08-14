@@ -97,7 +97,7 @@ Every adapter translates into one canonical event:
 {
   "agent": "claude",              // open-ended; unknown agents still render
   "session_id": "…",
-  "project": "agent-inbox",       // git root name, else directory name
+  "project": "flick",             // git root name, else directory name
   "cwd": "/Users/you/code/thing",
   "type": "approval",             // approval | question | finished | error
   "title": "Bash",

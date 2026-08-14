@@ -19,8 +19,8 @@ func usage() -> Never {
                                    Push text into a running session's inbox
 
     ENVIRONMENT
-      AGENT_INBOX_SOCKET           Override the broker socket path
-      AGENT_INBOX_WAIT_SECONDS     How long a hook waits for you (default 570)
+      FLICK_SOCKET           Override the broker socket path
+      FLICK_WAIT_SECONDS     How long a hook waits for you (default 570)
     """
     print(text)
     exit(2)

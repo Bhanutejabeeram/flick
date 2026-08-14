@@ -140,7 +140,7 @@ enum ClaudeHook {
     /// so we answer first; if we do lose the race, a hook timeout is not a
     /// block — Claude Code just falls through to its own prompt.
     private static var waitMilliseconds: Int {
-        if let raw = ProcessInfo.processInfo.environment["AGENT_INBOX_WAIT_SECONDS"],
+        if let raw = ProcessInfo.processInfo.environment["FLICK_WAIT_SECONDS"],
            let seconds = Int(raw), seconds > 0 {
             return seconds * 1000
         }

@@ -4,7 +4,7 @@ import Foundation
 /// inspect, back up, or delete.
 public enum InboxPaths {
     public static var supportDirectory: URL {
-        if let override = ProcessInfo.processInfo.environment["AGENT_INBOX_HOME"], !override.isEmpty {
+        if let override = ProcessInfo.processInfo.environment["FLICK_HOME"], !override.isEmpty {
             return URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
         }
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -17,7 +17,7 @@ public enum InboxPaths {
     /// The listening socket. Unix socket paths are capped at 104 bytes on
     /// Darwin, so this stays short by construction.
     public static var socketPath: String {
-        if let override = ProcessInfo.processInfo.environment["AGENT_INBOX_SOCKET"], !override.isEmpty {
+        if let override = ProcessInfo.processInfo.environment["FLICK_SOCKET"], !override.isEmpty {
             return (override as NSString).expandingTildeInPath
         }
         return supportDirectory.appendingPathComponent("inbox.sock").path

@@ -45,8 +45,12 @@ enum ClaudeHook {
         if silentModes.contains(mode) { return passThrough() }
         if mode == "acceptEdits", editTools.contains(toolName) { return passThrough() }
 
-        // Already allowed by the user's own rules: stay quiet.
-        if PermissionRules.load(cwd: cwd).allows(toolName: toolName, toolInput: toolInput) {
+        // Already allowed by the user's own rules: stay quiet. A call that asks
+        // to run outside the sandbox is the exception — Claude Code prompts for
+        // those whatever the allow list says, so trusting the rules here would
+        // leave the user staring at a terminal prompt Flick never mentioned.
+        if !escapesSandbox(toolInput),
+           PermissionRules.load(cwd: cwd).allows(toolName: toolName, toolInput: toolInput) {
             return passThrough()
         }
 
@@ -102,6 +106,18 @@ enum ClaudeHook {
     }
 
     private static let editTools: Set<String> = ["Write", "Edit", "MultiEdit", "NotebookEdit"]
+
+    /// Whether the call explicitly opts out of the sandbox, which makes Claude
+    /// Code prompt however the allow list reads.
+    ///
+    /// Only the one key, and only when true. Guessing at other spellings looks
+    /// harmless but is not: `sandbox: false` is the *ordinary* state of a Bash
+    /// call, so treating it as an escape would disable allow-list silencing
+    /// wholesale and raise a blocking card for every command the user had
+    /// already approved.
+    private static func escapesSandbox(_ toolInput: [String: Any]) -> Bool {
+        toolInput["dangerouslyDisableSandbox"] as? Bool == true
+    }
 
     /// The full command-or-path text the risk rules scan for a tool call.
     private static func classifierCommand(toolName: String, toolInput: [String: Any]) -> String {

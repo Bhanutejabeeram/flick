@@ -18,31 +18,58 @@ struct WindowClamper: NSViewRepresentable {
     final class ClampingView: NSView {
         private var observers: [NSObjectProtocol] = []
 
+        /// SwiftUI re-lays-out this view whenever the inbox changes shape, which
+        /// is the one signal that always arrives: deciding a card resizes the
+        /// window, and for the menu-bar popover AppKit sets the real frame
+        /// after `viewDidMoveToWindow` without a notification we can observe.
+        override func layout() {
+            super.layout()
+            scheduleClamp()
+        }
+
+        /// Clamp after the current pass, never during it — AppKit is still
+        /// positioning the window while layout runs, and a frame set now is
+        /// simply overwritten.
+        private func scheduleClamp() {
+            guard let window else { return }
+            DispatchQueue.main.async { [weak window] in
+                guard let window else { return }
+                MainActor.assumeIsolated { Self.clamp(window) }
+            }
+        }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             observers.forEach(NotificationCenter.default.removeObserver)
             observers = []
-            guard let window else { return }
-            Self.clamp(window)
-            // Both notifications matter: growth arrives as a resize, the menu
-            // bar hiding arrives as a move.
-            for name in [NSWindow.didResizeNotification, NSWindow.didMoveNotification] {
+            guard window != nil else { return }
+            scheduleClamp()
+            // Each notification catches a different way the window can end up
+            // out of bounds: growth arrives as a resize, the menu bar hiding
+            // arrives as a move, and reopening a popover that AppKit reuses
+            // arrives as neither.
+            for name in [NSWindow.didResizeNotification,
+                         NSWindow.didMoveNotification,
+                         NSWindow.didBecomeKeyNotification] {
+                let isMove = name == NSWindow.didMoveNotification
                 observers.append(NotificationCenter.default.addObserver(
                     forName: name, object: window, queue: .main
                 ) { [weak window] _ in
                     guard let window else { return }
-                    MainActor.assumeIsolated { Self.clamp(window) }
+                    MainActor.assumeIsolated { Self.clamp(window, canBeADrag: isMove) }
                 })
             }
         }
 
-        private static func clamp(_ window: NSWindow) {
-            // Never correct a window the user is holding. The panel is
-            // drag-anywhere movable and `didMove` fires continuously through a
-            // drag, so clamping mid-gesture would fight the cursor near an
-            // edge. Whatever they let go of gets clamped on the next resize or
-            // reopen instead.
-            guard NSEvent.pressedMouseButtons == 0 else { return }
+        private static func clamp(_ window: NSWindow, canBeADrag: Bool = false) {
+            // Only a *move* can be a live drag, and correcting one mid-gesture
+            // would fight the cursor near a screen edge. A resize never is:
+            // it means the inbox grew or shrank on its own. Deciding a card
+            // holds the mouse button down at the instant the window resizes, so
+            // treating that as a drag would skip the one correction that
+            // matters most — the window resizing itself off the screen right
+            // as the user clicks Allow.
+            if canBeADrag, NSEvent.pressedMouseButtons != 0 { return }
             guard let visible = PanelPlacement.screen(for: window)?.visibleFrame else { return }
             let target = PanelPlacement.clamped(window.frame, in: visible)
             // The no-op guard is what stops setFrame → didMove → clamp from
